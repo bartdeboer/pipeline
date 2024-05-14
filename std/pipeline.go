@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/bitfield/script/pipeline"
+	"github.com/bartdeboer/pipeline"
 )
 
 // Pipeline[T any] provides a convenient embeddable implementation

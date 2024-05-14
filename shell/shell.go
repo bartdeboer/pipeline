@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/bitfield/script/pipeline"
+	"github.com/bartdeboer/pipeline"
 	"mvdan.cc/sh/v3/shell"
 )
 

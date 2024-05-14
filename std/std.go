@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bitfield/script/pipeline"
+	"github.com/bartdeboer/pipeline"
 )
 
 // File reads from the file path.
