@@ -3,8 +3,16 @@
 [![Mentioned in Awesome Go](https://awesome.re/mentioned-badge-flat.svg)](https://github.com/avelino/awesome-go)
 ![Tests](https://github.com/bitfield/script/actions/workflows/test.yml/badge.svg)
 
+# Fork of `script`
+
+This is a heavily restructured version of `script`, optimized for extending it
+with custom implementations. The original version of `script` can be found at:
+[https://github.com/bitfield/script/](https://github.com/bitfield/script/).
+
+Pipeline isn't intended to run by itself. It provides the core pipeline logic for (custom) implementations of `script`. An example implementation that closely replicates the original `script` API can be found at [https://github.com/bartdeboer/script/](https://github.com/bartdeboer/script/).
+
 ```go
-import "github.com/bitfield/script"
+import "github.com/bartdeboer/pipeline"
 ```
 
 [![Magical gopher logo](img/magic.png)](https://bitfieldconsulting.com/golang/scripting)

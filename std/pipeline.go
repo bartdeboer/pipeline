@@ -224,3 +224,29 @@ func (p *Pipeline[T]) WriteFile(path string) T {
 	p.PipeE(WriteFile(path))
 	return p.self
 }
+
+// With* functions
+
+// WithError sets the error err on the pipe
+func (p *Pipeline[T]) WithError(err error) T {
+	p.Pipeline.WithError(err)
+	return p.self
+}
+
+// WithReader sets the pipe's input reader to r
+func (p *Pipeline[T]) WithReader(r io.Reader) T {
+	p.Pipeline.WithReader(r)
+	return p.self
+}
+
+// WithStderr redirects the standard error output for commands
+func (p *Pipeline[T]) WithStderr(w io.Writer) T {
+	p.Pipeline.WithStderr(w)
+	return p.self
+}
+
+// WithStdout sets the pipe's standard output to the writer w
+func (p *Pipeline[T]) WithStdout(w io.Writer) T {
+	p.Pipeline.WithStdout(w)
+	return p.self
+}
