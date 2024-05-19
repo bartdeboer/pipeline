@@ -40,7 +40,7 @@ func NewPipeline[T any](t T) Pipeline[T] {
 // AppendFile reads the input and appends it to the file path, creating it if necessary,
 // and outputs the number of bytes successfully written
 func (p *Pipeline[T]) AppendFile(path string) T {
-	p.PipeE(AppendFile(path))
+	p.Pipe(AppendFile(path))
 	return p.self
 }
 
@@ -52,106 +52,106 @@ func (p *Pipeline[T]) Basename() T {
 
 // Column reads each line and outputs column col, where columns are whitespace delimited and the first column is column 1
 func (p *Pipeline[T]) Column(col int) T {
-	p.PipeE(Column(col))
+	p.Pipe(Column(col))
 	return p.self
 }
 
 // Concat reads each line as a file path and outputs the file contents
 func (p *Pipeline[T]) Concat() T {
-	p.PipeE(Concat())
+	p.Pipe(Concat())
 	return p.self
 }
 
 // CountLines returns the number of lines of input, or an error.
 func (p *Pipeline[T]) CountLines() T {
-	p.PipeE(CountLines())
+	p.Pipe(CountLines())
 	return p.self
 }
 
 // Dirname reads each line as a file path and outputs each path with just the leading directory remaining
 func (p *Pipeline[T]) Dirname() T {
-	p.PipeE(Dirname())
+	p.Pipe(Dirname())
 	return p.self
 }
 
 // Get reads the input as the request body, sends the request and outputs the response
 func (p *Pipeline[T]) Do(req *http.Request, c *http.Client) T {
-	p.PipeE(Do(req, c))
+	p.Pipe(Do(req, c))
 	return p.self
 }
 
 // Deprecated: use [Pipe.FilterLine] or [Pipe.FilterScan] instead
 func (p *Pipeline[T]) EachLine(process func(string, *strings.Builder)) T {
-	p.PipeE(EachLine(process))
+	p.Pipe(EachLine(process))
 	return p.self
 }
 
 // Echo ignores its input and outputs string s
 func (p *Pipeline[T]) Echo(s string) T {
-	p.PipeE(Echo(s))
+	p.Pipe(Echo(s))
 	return p.self
 }
 
 // FilterLine reads the input, calls the function filter on each line and outputs the result
 func (p *Pipeline[T]) FilterLine(filter func(string) string) T {
-	p.PipeE(FilterLine(filter))
+	p.Pipe(FilterLine(filter))
 	return p.self
 }
 
 // First produces only the first n lines of the input and outputs only the first n number of lines
 func (p *Pipeline[T]) First(n int) T {
-	p.PipeE(First(n))
+	p.Pipe(First(n))
 	return p.self
 }
 
 // Freq reads the input and outputs only the unique lines, each prefixed with
 // a frequency count, in descending numerical order
 func (p *Pipeline[T]) Freq() T {
-	p.PipeE(Freq())
+	p.Pipe(Freq())
 	return p.self
 }
 
 // Get reads the input as the request body, sends a GET request and outputs the response
 func (p *Pipeline[T]) Get(url string, c *http.Client) T {
-	p.PipeE(Get(url, c))
+	p.Pipe(Get(url, c))
 	return p.self
 }
 
 // Join reads all the lines and joins them into a single space-separated string
 func (p *Pipeline[T]) Join() T {
-	p.PipeE(Join())
+	p.Pipe(Join())
 	return p.self
 }
 
 // First reads the input and outputs only the last n number of lines
 func (p *Pipeline[T]) Last(n int) T {
-	p.PipeE(Last(n))
+	p.Pipe(Last(n))
 	return p.self
 }
 
 // Match reads the input and outputs lines that contain the string s
 func (p *Pipeline[T]) Match(s string) T {
-	p.PipeE(Match(s))
+	p.Pipe(Match(s))
 	return p.self
 }
 
 // MatchRegexp reads the input and outputs lines that match the compiled regexp re
 func (p *Pipeline[T]) MatchRegexp(re *regexp.Regexp) T {
-	p.PipeE(MatchRegexp(re))
+	p.Pipe(MatchRegexp(re))
 	return p.self
 }
 
 // Get reads the input as the request body, sends a POST request and outputs the response
-func (p *Pipeline[T]) Pipe(program pipeline.ProcessE) T {
+func (p *Pipeline[T]) Pipe(program pipeline.Program) T {
 	p.Pipeline.Pipe(program)
 	return p.self
 }
 
-// Get reads the input as the request body, sends a POST request and outputs the response
-func (p *Pipeline[T]) PipeE(program pipeline.Process) T {
-	p.Pipeline.PipeE(program)
-	return p.self
-}
+// // Get reads the input as the request body, sends a POST request and outputs the response
+// func (p *Pipeline[T]) PipeE(program pipeline.Process) T {
+// 	p.Pipeline.PipeE(program)
+// 	return p.self
+// }
 
 // Get reads the input as the request body, sends a POST request and outputs the response
 func (p *Pipeline[T]) Post(url string, c *http.Client) T {

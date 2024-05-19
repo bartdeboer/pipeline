@@ -13,20 +13,105 @@ import (
 	"sync"
 )
 
-// A pipeable process that doesn't write errors
-type Process func(stdin io.Reader, stdout io.Writer) error
+type Program interface {
+	Start() error
+	SetError(err error) error
+	Error() error
+	Exit(err error) error
+	SetStdin(stdin io.Reader)
+	SetStdout(stdout io.Writer)
+	SetStderr(stderr io.Writer)
+}
 
-// A pipeable process that writes errors
-type ProcessE func(stdin io.Reader, stdout io.Writer, stderr io.Writer) error
+// BaseProgram is for convenience to easily create new programs
+// that only require a custom StartFn function.
+type BaseProgram struct {
+	Stdin   io.Reader
+	Stdout  io.Writer
+	Stderr  io.Writer
+	err     error
+	StartFn func() error
+}
+
+func (b *BaseProgram) SetStdin(stdin io.Reader) {
+	b.Stdin = stdin
+}
+
+func (b *BaseProgram) SetStdout(stdout io.Writer) {
+	b.Stdout = stdout
+}
+
+func (b *BaseProgram) SetStderr(stderr io.Writer) {
+	b.Stderr = stderr
+}
+
+func (b *BaseProgram) Start() error {
+	if b.StartFn == nil {
+		return nil
+	}
+	return b.StartFn()
+}
+
+func (b *BaseProgram) SetError(err error) error {
+	if err == nil {
+		return nil
+	}
+	// if b.Stderr != nil {
+	// 	fmt.Fprintln(b.Stderr, err)
+	// }
+	b.err = err
+	return err
+}
+
+func (b *BaseProgram) Error() error {
+	return b.err
+}
+
+func (b *BaseProgram) Exit(err error) error {
+	if rc, ok := b.Stdin.(io.ReadCloser); ok {
+		rc.Close()
+	}
+	if rc, ok := b.Stdout.(io.ReadCloser); ok {
+		rc.Close()
+	}
+	return b.SetError(err)
+}
+
+func (b *BaseProgram) Fprint(a ...any) error {
+	if b.Stdout == nil {
+		return nil
+	}
+	_, err := fmt.Fprint(b.Stdout, a...)
+	if err != nil {
+		return b.Exit(err)
+	}
+	return nil
+}
+
+func (b *BaseProgram) FprintStderr(a ...any) {
+	if b.Stderr == nil {
+		return
+	}
+	fmt.Fprint(b.Stderr, a...)
+}
+
+func NewBaseProgram() *BaseProgram {
+	return &BaseProgram{
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}
+}
 
 // Pipeline represents a pipeline object with an associated [ReadAutoCloser].
 type Pipeline struct {
-	Stdin       io.Reader
-	Stdout      io.Writer
-	Stderr      io.Writer
-	lastPipe    *Pipe
-	exitStatus  int
-	exitOnError bool
+	Stdin         io.Reader
+	Stdout        io.Writer
+	Stderr        io.Writer
+	lastPipe      *Pipe
+	exitStatus    int
+	exitOnError   bool
+	combineOutput bool
 
 	// because pipe stages are concurrent, protect 'err'
 	mu  *sync.Mutex
@@ -37,27 +122,20 @@ type Pipeline struct {
 // attach another reader to it).
 func NewPipeline() *Pipeline {
 	return &Pipeline{
-		Stdin:       os.Stdin,
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		lastPipe:    &Pipe{},
-		exitOnError: false,
-		mu:          new(sync.Mutex),
+		Stdin:         os.Stdin,
+		Stdout:        os.Stdout,
+		Stderr:        os.Stderr,
+		lastPipe:      &Pipe{},
+		exitOnError:   false,
+		combineOutput: false,
+		mu:            new(sync.Mutex),
 	}
 }
 
 // Add adds one or more programs to the pipeline.
-func (p *Pipeline) Add(programs ...ProcessE) *Pipeline {
+func (p *Pipeline) Add(programs ...Program) *Pipeline {
 	for _, program := range programs {
 		p.Pipe(program)
-	}
-	return p
-}
-
-// Add adds one or more programs to the pipeline.
-func (p *Pipeline) AddE(programs ...Process) *Pipeline {
-	for _, program := range programs {
-		p.PipeE(program)
 	}
 	return p
 }
@@ -151,26 +229,34 @@ func (p *Pipeline) IsClosed() bool {
 // Pipe runs concurrently, so its goroutine will not exit until the pipe has
 // been fully read. Use [Pipe.Wait] to wait for all concurrent pipes to
 // complete.
-func (p *Pipeline) Pipe(program ProcessE) *Pipeline {
+func (p *Pipeline) Pipe(program Program) *Pipeline {
 	if p.exitOnError && p.Error() != nil {
 		return p
 	}
+	if program.Error() != nil {
+		p.SetError(program.Error())
+		if p.exitOnError {
+			return p
+		}
+	}
 	previousPipe := p.lastPipe
-	nextPipe := NewPipe()
+	nextPipe := NewPipe() // Pipe simply provides a piped writer and reader
+	program.SetStdin(previousPipe)
+	program.SetStdout(nextPipe)
+	if p.combineOutput {
+		program.SetStderr(nextPipe)
+	} else {
+		program.SetStderr(p.Stderr)
+	}
 	p.lastPipe = nextPipe
 	go func() {
 		defer nextPipe.Close()
-		err := program(previousPipe, nextPipe, p.Stderr)
+		err := program.Start()
 		if err != nil {
 			p.SetError(err)
 		}
 	}()
 	return p
-}
-
-// PipeE wraps the program in WithErr() and writes errors received to stderr
-func (p *Pipeline) PipeE(program Process) *Pipeline {
-	return p.Pipe(WithErr(program))
 }
 
 // Read reads up to len(b) bytes from the pipe into b. It returns the number of
@@ -185,7 +271,7 @@ func (p *Pipeline) Read(b []byte) (int, error) {
 
 // Run adds one or more programs to the pipeline and/or runs the pipeline
 // with all programs added to it.
-func (p *Pipeline) Run(programs ...ProcessE) (int64, error) {
+func (p *Pipeline) Run(programs ...Program) (int64, error) {
 	p.Add(programs...)
 	written, err := io.Copy(p.Stdout, p)
 	if err != nil {
@@ -194,18 +280,18 @@ func (p *Pipeline) Run(programs ...ProcessE) (int64, error) {
 	return written, p.Error()
 }
 
-// RunE does the same as Run but wraps the programs in WithErr
-func (p *Pipeline) RunE(programs ...Process) (int64, error) {
-	p.AddE(programs...)
-	return p.Run()
-}
-
 // Scanner (FilterScan) sends the contents of the pipe to the function filter, a line at
 // a time, and produces the result. filter takes each line as a string and an
 // [io.Writer] to write its output to. See [Pipe.Filter] for concurrency
 // handling.
 func (p *Pipeline) Scanner(filter func(string, io.Writer)) *Pipeline {
-	return p.PipeE(Scanner(filter))
+	return p.Pipe(Scanner(filter))
+}
+
+// SetCombinedOutput configures the pipeline to combine stderr with stdout
+func (p *Pipeline) SetCombinedOutput(v bool) *Pipeline {
+	p.combineOutput = v
+	return p
 }
 
 // SetError sets the error err on the pipe.
@@ -384,23 +470,14 @@ func newScanner(r io.Reader) *bufio.Scanner {
 }
 
 // Scanner is the scanner program that applies the specified filter line by line.
-func Scanner(filter func(string, io.Writer)) Process {
-	return func(r io.Reader, w io.Writer) error {
-		scanner := newScanner(r)
+func Scanner(filter func(string, io.Writer)) Program {
+	p := NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := newScanner(p.Stdin)
 		for scanner.Scan() {
-			filter(scanner.Text(), w)
+			filter(scanner.Text(), p.Stdout)
 		}
 		return scanner.Err()
 	}
-}
-
-// WithErr wraps the program and automatically writes errors it received to stderr
-func WithErr(program Process) ProcessE {
-	return func(stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-		err := program(stdin, stdout)
-		if err != nil {
-			fmt.Fprintf(stderr, "%v\n", err)
-		}
-		return err
-	}
+	return p
 }

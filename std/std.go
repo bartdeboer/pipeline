@@ -20,22 +20,23 @@ import (
 	"github.com/bartdeboer/pipeline"
 )
 
-// File reads from the file path.
-func File(path string) pipeline.ProcessE {
-	return func(_ io.Reader, w io.Writer, e io.Writer) error {
+func File(path string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	_, err := os.Stat(path)
+	p.SetError(err)
+	p.StartFn = func() error {
 		f, err := os.Open(path)
 		if err != nil {
-			fmt.Fprintln(e, err)
-			return err
+			return p.Exit(err)
 		}
 		defer f.Close()
-		_, err = io.Copy(w, f)
+		_, err = io.Copy(p.Stdout, f)
 		if err != nil {
-			fmt.Fprintln(e, err)
-			return err
+			return p.Exit(err)
 		}
 		return nil
 	}
+	return p
 }
 
 // FindFiles creates a pipe listing all the files in the directory dir and its
@@ -53,36 +54,41 @@ func File(path string) pipeline.ProcessE {
 //
 //	test/1.txt
 //	test/2.txt
-func FindFiles(dir string) pipeline.Process {
-	return func(_ io.Reader, w io.Writer) error {
+func FindFiles(dir string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	_, err := os.Stat(dir)
+	p.SetError(err)
+	p.StartFn = func() error {
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return err
+				return p.Exit(err)
 			}
 			if !info.IsDir() {
-				_, err = fmt.Fprint(w, path+"\n")
+				err := p.Fprint(path + "\n")
 				if err != nil {
-					return err
+					return p.Exit(err)
 				}
 			}
 			return nil
 		})
-		return err
+		return p.SetError(err)
 	}
+	return p
 }
 
 // Get makes an HTTP GET request to url, sending the contents of the pipe as
 // the request body, and produces the server's response. See [Pipe.Do] for how
 // the HTTP response status is interpreted.
-func Get(url string, c *http.Client) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		req, err := http.NewRequest(http.MethodGet, url, r)
+func Get(url string, c *http.Client) pipeline.Program {
+	p := &DoProgram{}
+	p.StartFn = func() error {
+		req, err := http.NewRequest(http.MethodGet, url, p.Stdin)
 		if err != nil {
-			return err
+			return p.Exit(err)
 		}
-		doFunc := Do(req, c)
-		return doFunc(io.NopCloser(r), w) // Wrap in NopCloser if the reader does not implement io.Closer
+		return p.Do(req, c)
 	}
+	return p
 }
 
 // IfExists tests whether path exists, and creates a pipe whose error status
@@ -91,11 +97,12 @@ func Get(url string, c *http.Client) pipeline.Process {
 // can be used to do some operation only if a given file exists:
 //
 //	IfExists("/foo/bar").Exec("/usr/bin/something")
-func IfExists(path string) pipeline.Process {
-	return func(_ io.Reader, _ io.Writer) error {
-		_, err := os.Stat(path)
-		return err
-	}
+func IfExists(path string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	_, err := os.Stat(path)
+	p.SetError(err)
+	p.StartFn = func() error { return nil }
+	return p
 }
 
 // ListFiles creates a pipe containing the files or directories specified by
@@ -105,67 +112,86 @@ func IfExists(path string) pipeline.Process {
 //	ListFiles("/data/*").Stdout()
 //
 // ListFiles does not recurse into subdirectories; use [FindFiles] instead.
-func ListFiles(path string) pipeline.Process {
-	return func(_ io.Reader, w io.Writer) error {
-		if strings.ContainsAny(path, "[]^*?\\{}!") {
-			fileNames, err := filepath.Glob(path)
+func ListFiles(pattern string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+
+	listing, err := func() ([]string, error) {
+		if strings.ContainsAny(pattern, "[]^*?\\{}!") {
+			fileNames, err := filepath.Glob(pattern)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			_, err = fmt.Fprint(w, strings.Join(fileNames, "\n")+"\n")
-			return err
+			return fileNames, nil
 		}
-		entries, err := os.ReadDir(path)
+		entries, err := os.ReadDir(pattern)
 		if err != nil {
 			// Check for the case where the path matches exactly one file
-			s, err := os.Stat(path)
+			s, err := os.Stat(pattern)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if !s.IsDir() {
-				_, err = fmt.Fprint(w, path)
-				return err
+				return []string{pattern}, nil
 			}
-			return err
+			return nil, err
 		}
-		for _, e := range entries {
-			_, err = fmt.Fprint(w, filepath.Join(path, e.Name())+"\n")
+		matches := make([]string, len(entries))
+		for i, e := range entries {
+			matches[i] = filepath.Join(pattern, e.Name())
+		}
+		return matches, nil
+	}()
+
+	p.SetError(err)
+	p.StartFn = func() error {
+		err := p.Fprint(strings.Join(listing, "\n"))
+		if len(listing) > 1 {
+			p.Fprint("\n")
 		}
 		return err
 	}
+	return p
 }
 
 // Post makes an HTTP POST request to url, using the contents of the pipe as
 // the request body, and produces the server's response. See [Pipe.Do] for how
 // the HTTP response status is interpreted.
-func Post(url string, c *http.Client) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		req, err := http.NewRequest(http.MethodPost, url, r)
+func Post(url string, c *http.Client) pipeline.Program {
+	p := &DoProgram{}
+	p.StartFn = func() error {
+		req, err := http.NewRequest(http.MethodPost, url, p.Stdin)
 		if err != nil {
-			return err
+			return p.Exit(err)
 		}
-		doFunc := Do(req, c)
-		return doFunc(io.NopCloser(r), w) // Wrap in NopCloser if the reader does not implement io.Closer
+		return p.Do(req, c)
 	}
+	return p
 }
 
 // Stdin reads from [os.Stdin].
-func Stdin() pipeline.Process {
-	return func(_ io.Reader, w io.Writer) error {
-		_, err := io.Copy(w, os.Stdin)
+func Stdin() pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		_, err := io.Copy(p.Stdout, os.Stdin)
+		if err != nil {
+			p.Exit(err)
+		}
 		return err
 	}
+	return p
 }
 
 // AppendFile appends the contents of the pipe to the file path, creating it if
 // necessary, and returns the number of bytes successfully written, or an
 // error.
-func AppendFile(path string) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		written, err := writeOrAppendFile(r, path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
-		fmt.Fprint(w, written)
-		return err
+func AppendFile(path string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		written, err := writeOrAppendFile(p.Stdin, path, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
+		fmt.Fprint(p.Stdout, written)
+		return p.SetError(err)
 	}
+	return p
 }
 
 // Basename reads paths from the pipe, one per line, and removes any leading
@@ -175,14 +201,37 @@ func AppendFile(path string) pipeline.Process {
 // If any line is empty, Basename will transform it to a single dot. Trailing
 // slashes are removed. The behaviour of Basename is the same as
 // [filepath.Base] (not by coincidence).
-func Basename() func(r io.Reader, w io.Writer) error {
+func Basename() pipeline.Program {
 	return FilterLine(filepath.Base)
+}
+
+// Buffer copies the stream in a buffered manner using the provided buffer
+func Buffer(buf []byte) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		_, err := io.CopyBuffer(p.Stdout, p.Stdin, buf)
+		return err
+	}
+	return p
+}
+
+// BufferAll reads the entire stream until EOF before writing it out
+func BufferAll() pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		data, err := io.ReadAll(p.Stdin)
+		if err != nil {
+			return err
+		}
+		return p.Fprint(data)
+	}
+	return p
 }
 
 // Column produces column col of each line of input, where the first column is
 // column 1, and columns are delimited by Unicode whitespace. Lines containing
 // fewer than col columns will be skipped.
-func Column(col int) pipeline.Process {
+func Column(col int) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		columns := strings.Fields(line)
 		if col > 0 && col <= len(columns) {
@@ -213,7 +262,7 @@ func Column(col int) pipeline.Process {
 // files can't be opened or read, Concat will simply skip these and carry on,
 // without setting the pipe's error status. This mimics the behaviour of Unix
 // cat(1).
-func Concat() pipeline.Process {
+func Concat() pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		input, err := os.Open(line)
 		if err != nil {
@@ -225,16 +274,20 @@ func Concat() pipeline.Process {
 }
 
 // CountLines returns the number of lines of input, or an error.
-func CountLines() pipeline.Process {
+func CountLines() pipeline.Program {
 	lines := 0
-	return func(r io.Reader, w io.Writer) error {
-		scanner := newScanner(r)
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := bufio.NewScanner(p.Stdin)
 		for scanner.Scan() {
 			lines++
 		}
-		fmt.Fprintln(w, lines)
-		return scanner.Err()
+		if err := scanner.Err(); err != nil {
+			return p.Exit(err)
+		}
+		return p.Fprint(lines)
 	}
+	return p
 }
 
 // Dirname reads paths from the pipe, one per line, and produces only the
@@ -245,7 +298,7 @@ func CountLines() pipeline.Process {
 // If a line is empty, Dirname will transform it to a single dot. Trailing
 // slashes are removed, unless Dirname returns the root folder. Otherwise, the
 // behaviour of Dirname is the same as [filepath.Dir] (not by coincidence).
-func Dirname() pipeline.Process {
+func Dirname() pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		// filepath.Dir() does not handle trailing slashes correctly
 		if len(line) > 1 && strings.HasSuffix(line, "/") {
@@ -260,27 +313,38 @@ func Dirname() pipeline.Process {
 	})
 }
 
+type DoProgram struct {
+	pipeline.BaseProgram
+	client *http.Client
+	req    *http.Request
+}
+
+func (d *DoProgram) Do(req *http.Request, c *http.Client) error {
+	resp, err := c.Do(req)
+	if err != nil {
+		return d.Exit(err)
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(d.Stdout, resp.Body)
+	if err != nil {
+		return d.Exit(err)
+	}
+	if resp.StatusCode/100 != 2 {
+		return d.Exit(fmt.Errorf("unexpected HTTP response status: %s", resp.Status))
+	}
+	return nil
+}
+
 // Do performs the HTTP request req using the pipe's configured HTTP client, as
 // set by [Pipe.WithHTTPClient], or [http.DefaultClient] otherwise. The
 // response body is streamed concurrently to the pipe's output. If the response
 // status is anything other than HTTP 200-299, the pipe's error status is set.
-func Do(req *http.Request, c *http.Client) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		resp, err := c.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		_, err = io.Copy(w, resp.Body)
-		if err != nil {
-			return err
-		}
-		// Any HTTP 2xx status code is considered okay
-		if resp.StatusCode/100 != 2 {
-			return fmt.Errorf("unexpected HTTP response status: %s", resp.Status)
-		}
-		return nil
+func Do(req *http.Request, c *http.Client) pipeline.Program {
+	p := &DoProgram{}
+	p.StartFn = func() error {
+		return p.Do(req, c)
 	}
+	return p
 }
 
 // EachLine calls the function process on each line of input, passing it the
@@ -288,25 +352,27 @@ func Do(req *http.Request, c *http.Client) pipeline.Process {
 //
 // Deprecated: use [Pipe.FilterLine] or [Pipe.FilterScan] instead, which run
 // concurrently and don't do unnecessary reads on the input.
-func EachLine(process func(string, *strings.Builder)) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		scanner := newScanner(r)
+func EachLine(process func(string, *strings.Builder)) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := newScanner(p.Stdin)
 		output := new(strings.Builder)
 		for scanner.Scan() {
 			process(scanner.Text(), output)
 		}
-		fmt.Fprint(w, output.String())
-		return scanner.Err()
+		return p.Fprint(output.String())
 	}
+	return p
 }
 
 // Echo sets the pipe's reader to one that produces the string s, detaching any
 // existing reader without draining or closing it.
-func Echo(s string) pipeline.Process {
-	return func(_ io.Reader, w io.Writer) error {
-		_, err := fmt.Fprint(w, s)
-		return err
+func Echo(s string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		return p.Fprint(s)
 	}
+	return p
 }
 
 // Exec runs cmdLine as an external command, sending it the contents of the
@@ -327,20 +393,22 @@ func Echo(s string) pipeline.Process {
 // If the command writes to its standard error stream, this will also go to the
 // pipe, along with its standard output. However, the standard error text can
 // instead be redirected to a supplied writer, using [Pipe.WithStderr].
-func Exec(name string, arg ...string) pipeline.ProcessE {
-	return func(r io.Reader, w io.Writer, e io.Writer) error {
+func Exec(name string, arg ...string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
 		cmd := exec.Command(name, arg...)
-		cmd.Stdin = r
-		cmd.Stdout = w
-		cmd.Stderr = e
+		cmd.Stdin = p.Stdin
+		cmd.Stdout = p.Stdout
+		cmd.Stderr = p.Stderr
 		if err := cmd.Start(); err != nil {
 			return &pipeline.ExitError{
 				Code:    1,
 				Message: err.Error(),
 			}
 		}
-		return cmd.Wait()
+		return nil
 	}
+	return p
 }
 
 // ExecForEach renders cmdLine as a Go template for each line of input, running
@@ -351,13 +419,14 @@ func Exec(name string, arg ...string) pipeline.ProcessE {
 // syntax. For example:
 //
 //	ListFiles("*").ExecForEach("touch {{.}}").Wait()
-func ExecForEach(name string, arg ...string) pipeline.ProcessE {
-	return func(r io.Reader, w io.Writer, e io.Writer) error {
-		scanner := newScanner(r)
+func ExecForEach(name string, arg ...string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := newScanner(p.Stdin)
 		for scanner.Scan() {
 			cmd := exec.Command(name, arg...)
-			cmd.Stdout = w
-			cmd.Stderr = e
+			cmd.Stdout = p.Stdout
+			cmd.Stderr = p.Stderr
 			err := cmd.Start()
 			if err != nil {
 				fmt.Fprintln(cmd.Stderr, err)
@@ -371,12 +440,13 @@ func ExecForEach(name string, arg ...string) pipeline.ProcessE {
 		}
 		return scanner.Err()
 	}
+	return p
 }
 
 // FilterLine sends the contents of the pipe to the function filter, a line at
 // a time, and produces the result. filter takes each line as a string and
 // returns a string as its output. See [Pipe.Filter] for concurrency handling.
-func FilterLine(filter func(string) string) pipeline.Process {
+func FilterLine(filter func(string) string) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		fmt.Fprintln(w, filter(line))
 	})
@@ -385,17 +455,19 @@ func FilterLine(filter func(string) string) pipeline.Process {
 // First produces only the first n lines of the pipe's contents, or all the
 // lines if there are less than n. If n is zero or negative, there is no output
 // at all.
-func First(n int) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		scanner := newScanner(r)
+func First(n int) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := newScanner(p.Stdin)
 		for i := 0; i < n && scanner.Scan(); i++ {
-			_, err := fmt.Fprintln(w, scanner.Text())
+			_, err := fmt.Fprintln(p.Stdout, scanner.Text())
 			if err != nil {
 				return err
 			}
 		}
 		return scanner.Err()
 	}
+	return p
 }
 
 // Freq produces only the unique lines from the pipe's contents, each prefixed
@@ -416,14 +488,15 @@ func First(n int) pipeline.Process {
 //
 // Like Unix uniq(1), Freq right-justifies its count values in a column for
 // readability, padding with spaces if necessary.
-func Freq() pipeline.Process {
+func Freq() pipeline.Program {
 	freq := map[string]int{}
 	type frequency struct {
 		line  string
 		count int
 	}
-	return func(r io.Reader, w io.Writer) error {
-		scanner := newScanner(r)
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := newScanner(p.Stdin)
 		for scanner.Scan() {
 			freq[scanner.Text()]++
 		}
@@ -444,56 +517,61 @@ func Freq() pipeline.Process {
 		})
 		fieldWidth := len(strconv.Itoa(max))
 		for _, item := range freqs {
-			fmt.Fprintf(w, "%*d %s\n", fieldWidth, item.count, item.line)
+			fmt.Fprintf(p.Stdout, "%*d %s\n", fieldWidth, item.count, item.line)
 		}
 		return nil
 	}
+	return p
 }
 
 // Join joins all the lines in the pipe's contents into a single
 // space-separated string, which will always end with a newline.
-func Join() pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		scanner := newScanner(r)
+func Join() pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		scanner := newScanner(p.Stdin)
 		first := true
 		for scanner.Scan() {
 			if !first {
-				fmt.Fprint(w, " ")
+				fmt.Fprint(p.Stdout, " ")
 			}
 			line := scanner.Text()
-			fmt.Fprint(w, line)
+			fmt.Fprint(p.Stdout, line)
 			first = false
 		}
-		fmt.Fprintln(w)
+		fmt.Fprintln(p.Stdout)
 		return scanner.Err()
 	}
+	return p
 }
 
 // Last produces only the last n lines of the pipe's contents, or all the lines
 // if there are less than n. If n is zero or negative, there is no output at
 // all.
-func Last(n int) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
+func Last(n int) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
 		if n <= 0 {
 			return nil
 		}
-		scanner := newScanner(r)
+		scanner := newScanner(p.Stdin)
 		input := ring.New(n)
 		for scanner.Scan() {
 			input.Value = scanner.Text()
 			input = input.Next()
 		}
-		input.Do(func(p interface{}) {
-			if p != nil {
-				fmt.Fprintln(w, p)
+		input.Do(func(s interface{}) {
+			if s != nil {
+				fmt.Fprintln(p.Stdout, s)
 			}
 		})
 		return scanner.Err()
 	}
+	return p
 }
 
 // Match produces only the input lines that contain the string s.
-func Match(s string) pipeline.Process {
+func Match(s string) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		if strings.Contains(line, s) {
 			fmt.Fprintln(w, line)
@@ -502,7 +580,7 @@ func Match(s string) pipeline.Process {
 }
 
 // MatchRegexp produces only the input lines that match the compiled regexp re.
-func MatchRegexp(re *regexp.Regexp) pipeline.Process {
+func MatchRegexp(re *regexp.Regexp) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		if re.MatchString(line) {
 			fmt.Fprintln(w, line)
@@ -511,7 +589,7 @@ func MatchRegexp(re *regexp.Regexp) pipeline.Process {
 }
 
 // Reject produces only lines that do not contain the string s.
-func Reject(s string) pipeline.Process {
+func Reject(s string) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		if !strings.Contains(line, s) {
 			fmt.Fprintln(w, line)
@@ -520,7 +598,7 @@ func Reject(s string) pipeline.Process {
 }
 
 // RejectRegexp produces only lines that don't match the compiled regexp re.
-func RejectRegexp(re *regexp.Regexp) pipeline.Process {
+func RejectRegexp(re *regexp.Regexp) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		if !re.MatchString(line) {
 			fmt.Fprintln(w, line)
@@ -530,7 +608,7 @@ func RejectRegexp(re *regexp.Regexp) pipeline.Process {
 
 // Replace replaces all occurrences of the string search with the string
 // replace.
-func Replace(search, replace string) pipeline.Process {
+func Replace(search, replace string) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		fmt.Fprintln(w, strings.ReplaceAll(line, search, replace))
 	})
@@ -539,34 +617,36 @@ func Replace(search, replace string) pipeline.Process {
 // ReplaceRegexp replaces all matches of the compiled regexp re with the string
 // replace. $x variables in the replace string are interpreted as by
 // [regexp#Regexp.Expand]; for example, $1 represents the text of the first submatch.
-func ReplaceRegexp(re *regexp.Regexp, replace string) pipeline.Process {
+func ReplaceRegexp(re *regexp.Regexp, replace string) pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		fmt.Fprintln(w, re.ReplaceAllString(line, replace))
 	})
 }
 
-func Scanner(filter func(string, io.Writer)) pipeline.Process {
+func Scanner(filter func(string, io.Writer)) pipeline.Program {
 	return pipeline.Scanner(filter)
 }
 
 // SHA256Sum returns the hex-encoded SHA-256 hash of the entire contents of the
 // pipe, or an error.
-func SHA256Sum() pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
+func SHA256Sum() pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
 		hasher := sha256.New()
-		_, err := io.Copy(hasher, r)
+		_, err := io.Copy(hasher, p.Stdin)
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprint(w, hex.EncodeToString(hasher.Sum(nil)))
+		_, err = fmt.Fprint(p.Stdout, hex.EncodeToString(hasher.Sum(nil)))
 		return err
 	}
+	return p
 }
 
 // SHA256Sums reads paths from the pipe, one per line, and produces the
 // hex-encoded SHA-256 hash of each corresponding file, one per line. Any files
 // that cannot be opened or read will be ignored.
-func SHA256Sums() pipeline.Process {
+func SHA256Sums() pipeline.Program {
 	return Scanner(func(line string, w io.Writer) {
 		f, err := os.Open(line)
 		if err != nil {
@@ -585,22 +665,25 @@ func SHA256Sums() pipeline.Process {
 // Stdout copies the pipe's contents to its configured standard output (using
 // [Pipe.WithStdout]), or to [os.Stdout] otherwise, and returns the number of
 // bytes successfully written, together with any error.
-func Stdout() pipeline.Process {
-	return func(r io.Reader, _ io.Writer) error {
-		_, err := io.Copy(os.Stdout, r)
+func Stdout() pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		_, err := io.Copy(os.Stdout, p.Stdin)
 		return err
 	}
+	return p
 }
 
 // Tee copies the pipe's contents to each of the supplied writers, like Unix
 // tee(1). If no writers are supplied, the default is the pipe's standard
 // output.
-func Tee(writers ...io.Writer) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
+func Tee(writers ...io.Writer) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
 		allWriters := make([]io.Writer, len(writers), len(writers)+1)
 		copy(allWriters, writers)
-		if w != nil {
-			allWriters = append(allWriters, w)
+		if p.Stdout != nil {
+			allWriters = append(allWriters, p.Stdout)
 		}
 		var teeWriter io.Writer
 		if len(allWriters) == 1 {
@@ -608,33 +691,35 @@ func Tee(writers ...io.Writer) pipeline.Process {
 		} else {
 			teeWriter = io.MultiWriter(allWriters...)
 		}
-		teeReader := io.TeeReader(r, teeWriter)
+		teeReader := io.TeeReader(p.Stdin, teeWriter)
 		_, err := io.Copy(io.Discard, teeReader)
 		return err
 	}
+	return p
 }
 
 // Wait reads the pipe to completion and discards the result. This is mostly
 // useful for waiting until concurrent filters have completed (see
 // [Pipe.Filter]).
-func Wait() pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		fmt.Println("Start program wait")
-		_, err := io.Copy(w, r)
-		fmt.Printf("Wait error: %v\n", err)
-		fmt.Println("End program Wait")
+func Wait() pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		_, err := io.Copy(io.Discard, p.Stdin)
 		return err
 	}
+	return p
 }
 
 // WriteFile writes the pipe's contents to the file path, truncating it if it
 // exists, and returns the number of bytes successfully written, or an error.
-func WriteFile(path string) pipeline.Process {
-	return func(r io.Reader, w io.Writer) error {
-		written, err := writeOrAppendFile(r, path, os.O_RDWR|os.O_CREATE|os.O_TRUNC)
-		fmt.Fprint(w, written)
+func WriteFile(path string) pipeline.Program {
+	p := pipeline.NewBaseProgram()
+	p.StartFn = func() error {
+		written, err := writeOrAppendFile(p.Stdin, path, os.O_RDWR|os.O_CREATE|os.O_TRUNC)
+		fmt.Fprint(p.Stdout, written)
 		return err
 	}
+	return p
 }
 
 func writeOrAppendFile(r io.Reader, path string, mode int) (int64, error) {
