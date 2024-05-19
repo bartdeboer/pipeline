@@ -46,7 +46,7 @@ func (p *Pipeline[T]) AppendFile(path string) T {
 
 // Basename reads each line as a file path and outputs each path with any leading directory components removed
 func (p *Pipeline[T]) Basename() T {
-	p.PipeE(Basename())
+	p.Pipe(Basename())
 	return p.self
 }
 
@@ -155,49 +155,49 @@ func (p *Pipeline[T]) Pipe(program pipeline.Program) T {
 
 // Get reads the input as the request body, sends a POST request and outputs the response
 func (p *Pipeline[T]) Post(url string, c *http.Client) T {
-	p.PipeE(Post(url, c))
+	p.Pipe(Post(url, c))
 	return p.self
 }
 
 // Reject reads the input and outputs lines that do not contain the string s
 func (p *Pipeline[T]) Reject(s string) T {
-	p.PipeE(Reject(s))
+	p.Pipe(Reject(s))
 	return p.self
 }
 
 // RejectRegexp reads the input and outputs lines that do not match the compiled regexp re
 func (p *Pipeline[T]) RejectRegexp(re *regexp.Regexp) T {
-	p.PipeE(RejectRegexp(re))
+	p.Pipe(RejectRegexp(re))
 	return p.self
 }
 
 // Replace reads the input and replaces all occurrences of the string search with the string replace
 func (p *Pipeline[T]) Replace(search, replace string) T {
-	p.PipeE(Replace(search, replace))
+	p.Pipe(Replace(search, replace))
 	return p.self
 }
 
 // ReplaceRegexp reads the input and replaces all matches of the compiled regexp re with the string replace
 func (p *Pipeline[T]) ReplaceRegexp(re *regexp.Regexp, replace string) T {
-	p.PipeE(ReplaceRegexp(re, replace))
+	p.Pipe(ReplaceRegexp(re, replace))
 	return p.self
 }
 
 // Scanner reads the input into a scanner, calls the function filter on each line and outputs the result
 func (p *Pipeline[T]) Scanner(filter func(string, io.Writer)) T {
-	p.PipeE(Scanner(filter))
+	p.Pipe(Scanner(filter))
 	return p.self
 }
 
 // SHA256Sum reads the input and outputs the hex-encoded SHA-256 hash
 func (p *Pipeline[T]) SHA256Sum() T {
-	p.PipeE(SHA256Sum())
+	p.Pipe(SHA256Sum())
 	return p.self
 }
 
 // SHA256Sum reads the input and outputs the hex-encoded SHA-256 hash of each line
 func (p *Pipeline[T]) SHA256Sums() T {
-	p.PipeE(SHA256Sums())
+	p.Pipe(SHA256Sums())
 	return p.self
 }
 
@@ -209,7 +209,7 @@ func (p *Pipeline[T]) Exec(name string, arg ...string) T {
 
 // Tee reads the input and copies it to each of the supplied writers, like Unix tee(1)
 func (p *Pipeline[T]) Tee(writers ...io.Writer) T {
-	p.PipeE(Tee(writers...))
+	p.Pipe(Tee(writers...))
 	return p.self
 }
 
@@ -221,7 +221,7 @@ func (p *Pipeline[T]) Wait() T {
 // WriteFile reads the input and writes it to the file path, truncating it if it exists,
 // and outputs the number of bytes successfully written
 func (p *Pipeline[T]) WriteFile(path string) T {
-	p.PipeE(WriteFile(path))
+	p.Pipe(WriteFile(path))
 	return p.self
 }
 
