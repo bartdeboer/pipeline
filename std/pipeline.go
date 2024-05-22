@@ -207,6 +207,12 @@ func (p *Pipeline[T]) Exec(name string, arg ...string) T {
 	return p.self
 }
 
+// Exec executes the command with name and arguments, using input as stdin and outputs the result
+func (p *Pipeline[T]) ExecForEach(builder func(line string) (string, []string)) T {
+	p.Pipe(ExecForEach(builder))
+	return p.self
+}
+
 // Tee reads the input and copies it to each of the supplied writers, like Unix tee(1)
 func (p *Pipeline[T]) Tee(writers ...io.Writer) T {
 	p.Pipe(Tee(writers...))

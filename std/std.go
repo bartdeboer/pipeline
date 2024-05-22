@@ -419,11 +419,12 @@ func Exec(name string, arg ...string) pipeline.Program {
 // syntax. For example:
 //
 //	ListFiles("*").ExecForEach("touch {{.}}").Wait()
-func ExecForEach(name string, arg ...string) pipeline.Program {
+func ExecForEach(builder func(line string) (name string, arg []string)) pipeline.Program {
 	p := pipeline.NewBaseProgram()
 	p.StartFn = func() error {
 		scanner := newScanner(p.Stdin)
 		for scanner.Scan() {
+			name, arg := builder(scanner.Text())
 			cmd := exec.Command(name, arg...)
 			cmd.Stdout = p.Stdout
 			cmd.Stderr = p.Stderr
